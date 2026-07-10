@@ -1,26 +1,35 @@
 package com.maxdev.aisearchbrowser
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.setPadding
+import com.google.android.material.bottomsheet.BottomSheetDialog
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,18 +37,34 @@ class MainActivity : AppCompatActivity() {
     private var currentTabIndex = -1
     private var nextTabId = 1
 
+    private lateinit var palette: Palette
+
     // Views that get rebuilt/updated as state changes
     private lateinit var root: LinearLayout
     private lateinit var tabStrip: LinearLayout
-    private lateinit var engineLabel: TextView
-    private lateinit var aiRow: LinearLayout
+    private lateinit var engineBadge: TextView
+    private lateinit var aiBadge: TextView
     private lateinit var subTabRow: LinearLayout
     private lateinit var searchInput: EditText
-    private lateinit var contentContainer: android.widget.FrameLayout
+    private lateinit var contentContainer: FrameLayout
     private lateinit var progressBar: ProgressBar
+
+    // ---- WebView <input type=file> support ----
+    private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
+    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val callback = pendingFileCallback
+        pendingFileCallback = null
+        if (callback == null) return@registerForActivityResult
+        val data = result.data
+        val uris: Array<Uri>? = if (result.resultCode == Activity.RESULT_OK && data != null) {
+            WebChromeClient.FileChooserParams.parseResult(result.resultCode, data)
+        } else null
+        callback.onReceiveValue(uris)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        palette = ThemePrefs.resolvePalette(this)
         buildUi()
         addNewTab(switchToIt = true)
     }
@@ -52,47 +77,64 @@ class MainActivity : AppCompatActivity() {
     private fun buildUi() {
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
+            setBackgroundColor(palette.background)
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         setContentView(root)
 
-        // ---- Tab strip (browser tabs, Chrome-style) ----
-        val tabStripScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
+        // ---- Tab strip (browser tabs, Chrome-style) + settings gear ----
+        val tabStripRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        val tabStripScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         tabStrip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(8))
         }
         tabStripScroll.addView(tabStrip)
-        root.addView(tabStripScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        val settingsButton = TextView(this).apply {
+            text = "⚙"
+            textSize = 18f
+            setTextColor(palette.textSecondary)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setOnClickListener { showSettingsDialog() }
+        }
+        tabStripRow.addView(tabStripScroll, LinearLayout.LayoutParams(0, dp(48), 1f))
+        tabStripRow.addView(settingsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)))
+        root.addView(tabStripRow)
 
         addDivider()
 
-        // ---- Search engine row ----
-        val engineRow = LinearLayout(this).apply {
+        // ---- Search engine + AI row ----
+        val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         val engineCaption = TextView(this).apply {
             text = "Поисковая система:"
-            setTextColor(Color.parseColor("#5F6368"))
+            setTextColor(palette.textSecondary)
         }
-        engineLabel = pillButton(currentTab()?.searchEngine?.label ?: "DuckDuckGo") {
-            showEnginePopup(it)
+        engineBadge = circleBadge()
+        engineBadge.setOnClickListener { showEnginePicker() }
+
+        val spacer = View(this)
+
+        val aiCaption = TextView(this).apply {
+            text = "ИИ:"
+            setTextColor(palette.textSecondary)
+            setPadding(dp(4), 0, 0, 0)
         }
-        val switchEngineLink = TextView(this).apply {
-            text = "сменить поиск"
-            setTextColor(Color.parseColor("#1A73E8"))
-            setPadding(dp(12), 0, 0, 0)
-            setOnClickListener { cycleEngine() }
-        }
-        engineRow.addView(engineCaption)
-        engineRow.addView(engineLabel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-        engineRow.addView(switchEngineLink)
-        root.addView(engineRow)
+        aiBadge = circleBadge()
+        aiBadge.setOnClickListener { showAiPicker() }
+
+        controlsRow.addView(engineCaption)
+        controlsRow.addView(engineBadge, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(8) })
+        controlsRow.addView(spacer, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        controlsRow.addView(aiCaption)
+        controlsRow.addView(aiBadge, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(8) })
+        root.addView(controlsRow)
 
         // ---- Search box row ----
         val searchRow = LinearLayout(this).apply {
@@ -102,19 +144,21 @@ class MainActivity : AppCompatActivity() {
         }
         searchInput = EditText(this).apply {
             hint = "Задайте вопрос или введите запрос"
-            background = pillDrawable(Color.WHITE, Color.parseColor("#DADCE0"))
+            setHintTextColor(palette.textSecondary)
+            setTextColor(palette.textPrimary)
+            background = pillDrawable(palette.surface, palette.chipBorder)
             setPadding(dp(16), dp(12), dp(16), dp(12))
             setSingleLine(true)
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
             setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                     performSearch(); true
                 } else false
             }
         }
         val searchButton = ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_menu_search)
-            background = pillDrawable(Color.parseColor("#1A73E8"), Color.parseColor("#1A73E8"))
+            background = pillDrawable(palette.accent, palette.accent)
             setColorFilter(Color.WHITE)
             setOnClickListener { performSearch() }
         }
@@ -130,14 +174,6 @@ class MainActivity : AppCompatActivity() {
         root.addView(subTabRow)
         addDivider()
 
-        // ---- AI row (only shown for the "Ответ" sub-tab) ----
-        aiRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        root.addView(aiRow)
-
         // ---- Progress bar ----
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -146,12 +182,12 @@ class MainActivity : AppCompatActivity() {
         root.addView(progressBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)))
 
         // ---- Content container that holds the currently visible WebView ----
-        contentContainer = android.widget.FrameLayout(this)
+        contentContainer = FrameLayout(this)
         root.addView(contentContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
     private fun addDivider() {
-        val divider = View(this).apply { setBackgroundColor(Color.parseColor("#E0E0E0")) }
+        val divider = View(this).apply { setBackgroundColor(palette.divider) }
         root.addView(divider, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
     }
 
@@ -162,12 +198,16 @@ class MainActivity : AppCompatActivity() {
         setStroke(dp(1), stroke)
     }
 
-    private fun pillButton(text: String, onClick: (View) -> Unit): TextView = TextView(this).apply {
-        this.text = text
-        setPadding(dp(16), dp(8), dp(16), dp(8))
-        background = pillDrawable(Color.parseColor("#F1F3F4"), Color.parseColor("#DADCE0"))
-        setTextColor(Color.parseColor("#202124"))
-        setOnClickListener { onClick(it) }
+    private fun circleDrawable(fill: Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(fill)
+    }
+
+    /** A small round badge used both for the toolbar icons and inside the picker lists. */
+    private fun circleBadge(): TextView = TextView(this).apply {
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        textSize = 14f
     }
 
     // endregion
@@ -221,6 +261,29 @@ class MainActivity : AppCompatActivity() {
                 renderTabStrip()
                 renderSubTabsAndContent()
                 return true
+            }
+
+            // Fixes "file picker doesn't open" for <input type=file> on pages like
+            // ChatGPT/Claude/Gemini (attaching files/images) by launching the real
+            // Android file picker and returning the chosen file(s) to the webview.
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                pendingFileCallback?.onReceiveValue(null)
+                pendingFileCallback = filePathCallback
+                val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "*/*"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                }
+                return try {
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (e: Exception) {
+                    pendingFileCallback = null
+                    false
+                }
             }
         }
         return wv
@@ -280,8 +343,8 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 background = pillDrawable(
-                    if (index == currentTabIndex) Color.parseColor("#D2E3FC") else Color.parseColor("#F1F3F4"),
-                    Color.parseColor("#DADCE0")
+                    if (index == currentTabIndex) palette.chipSelectedBg else palette.chipBg,
+                    palette.chipBorder
                 )
                 setPadding(dp(12), dp(6), dp(6), dp(6))
                 setOnClickListener { switchToTab(index) }
@@ -289,11 +352,11 @@ class MainActivity : AppCompatActivity() {
             val title = TextView(this).apply {
                 text = tab.title
                 maxLines = 1
-                setTextColor(Color.parseColor("#202124"))
+                setTextColor(palette.textPrimary)
             }
             val close = TextView(this).apply {
                 text = " ✕ "
-                setTextColor(Color.parseColor("#5F6368"))
+                setTextColor(palette.textSecondary)
                 setOnClickListener { closeTab(index) }
             }
             chip.addView(title)
@@ -303,7 +366,8 @@ class MainActivity : AppCompatActivity() {
         val addButton = TextView(this).apply {
             text = " + "
             textSize = 18f
-            background = pillDrawable(Color.WHITE, Color.parseColor("#DADCE0"))
+            setTextColor(palette.textPrimary)
+            background = pillDrawable(palette.surface, palette.chipBorder)
             setPadding(dp(14), dp(6), dp(14), dp(6))
             setOnClickListener { addNewTab(switchToIt = true) }
         }
@@ -318,8 +382,15 @@ class MainActivity : AppCompatActivity() {
     private fun renderSubTabsAndContent() {
         val tab = currentTab() ?: return
 
-        // engine label
-        engineLabel.text = tab.searchEngine.label
+        // engine / AI badges
+        val (engineColor, engineLetter) = searchEngineAccent(tab.searchEngine)
+        engineBadge.background = circleDrawable(engineColor)
+        engineBadge.text = engineLetter
+
+        val (aiColor, aiSymbol) = aiServiceAccent(tab.aiService)
+        aiBadge.background = circleDrawable(aiColor)
+        aiBadge.text = aiSymbol
+
         searchInput.setText(tab.lastQuery)
 
         // sub-tabs
@@ -328,8 +399,8 @@ class MainActivity : AppCompatActivity() {
             val selected = st == tab.currentSubTab
             val tv = TextView(this).apply {
                 text = st.label
-                setTextColor(if (selected) Color.parseColor("#1A73E8") else Color.parseColor("#5F6368"))
-                setTypeface(typeface, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                setTextColor(if (selected) palette.accent else palette.textSecondary)
+                setTypeface(typeface, if (selected) Typeface.BOLD else Typeface.NORMAL)
                 gravity = Gravity.CENTER
                 setPadding(dp(4), dp(10), dp(4), dp(10))
                 setOnClickListener {
@@ -341,40 +412,6 @@ class MainActivity : AppCompatActivity() {
             subTabRow.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
 
-        // AI row only for the "Ответ" tab
-        aiRow.removeAllViews()
-        aiRow.visibility = if (tab.currentSubTab == SubTab.ANSWER) View.VISIBLE else View.GONE
-        if (tab.currentSubTab == SubTab.ANSWER) {
-            val switchAiLink = TextView(this).apply {
-                text = "сменить ИИ"
-                setTextColor(Color.parseColor("#1A73E8"))
-                setOnClickListener {
-                    tab.aiService = AiService.next(tab.aiService)
-                    tab.answerWebView.loadUrl(if (tab.lastQuery.isNotBlank()) tab.aiService.queryUrl(tab.lastQuery) else tab.aiService.homeUrl())
-                    renderSubTabsAndContent()
-                }
-            }
-            aiRow.addView(switchAiLink)
-            AiService.values().forEach { ai ->
-                val chip = TextView(this).apply {
-                    text = ai.label
-                    val selected = ai == tab.aiService
-                    background = pillDrawable(
-                        if (selected) Color.parseColor("#1A73E8") else Color.WHITE,
-                        Color.parseColor("#DADCE0")
-                    )
-                    setTextColor(if (selected) Color.WHITE else Color.parseColor("#202124"))
-                    setPadding(dp(14), dp(6), dp(14), dp(6))
-                    setOnClickListener {
-                        tab.aiService = ai
-                        tab.answerWebView.loadUrl(if (tab.lastQuery.isNotBlank()) ai.queryUrl(tab.lastQuery) else ai.homeUrl())
-                        renderSubTabsAndContent()
-                    }
-                }
-                aiRow.addView(chip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-            }
-        }
-
         // content: show the correct webview, detaching it from any previous parent first
         val wv = tab.webViewFor(tab.currentSubTab)
         contentContainer.removeAllViews()
@@ -383,32 +420,117 @@ class MainActivity : AppCompatActivity() {
         tab.refreshCurrentSubTab()
     }
 
-    private fun showEnginePopup(anchor: View) {
+    /** Bottom-sheet picker for the search engine (Google / Bing / DuckDuckGo / Yandex). */
+    private fun showEnginePicker() {
         val tab = currentTab() ?: return
-        val popup = PopupMenu(this, anchor)
-        SearchEngine.values().forEach { popup.menu.add(it.label) }
-        popup.setOnMenuItemClickListener { item ->
-            val chosen = SearchEngine.values().first { it.label == item.title }
-            tab.searchEngine = chosen
-            if (tab.currentSubTab != SubTab.ANSWER) {
-                tab.webViewFor(tab.currentSubTab).loadUrl(
-                    if (tab.currentSubTab == SubTab.LINKS) chosen.searchUrl(tab.lastQuery.ifBlank { "" })
-                    else chosen.imagesUrl(tab.lastQuery.ifBlank { "" })
-                )
-            }
-            renderSubTabsAndContent()
-            true
+        val dialog = BottomSheetDialog(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            setBackgroundColor(palette.surface)
         }
-        popup.show()
+        container.addView(TextView(this).apply {
+            text = "Поисковая система"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(palette.textPrimary)
+            setPadding(0, 0, 0, dp(12))
+        })
+        SearchEngine.values().forEach { engine ->
+            val (color, letter) = searchEngineAccent(engine)
+            val selected = engine == tab.searchEngine
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = if (selected) pillDrawable(palette.chipSelectedBg, palette.chipSelectedBg) else null
+                setOnClickListener {
+                    tab.searchEngine = engine
+                    if (tab.currentSubTab != SubTab.ANSWER) {
+                        tab.webViewFor(tab.currentSubTab).loadUrl(
+                            if (tab.currentSubTab == SubTab.LINKS) engine.searchUrl(tab.lastQuery.ifBlank { "" })
+                            else engine.imagesUrl(tab.lastQuery.ifBlank { "" })
+                        )
+                    }
+                    renderSubTabsAndContent()
+                    dialog.dismiss()
+                }
+            }
+            row.addView(circleBadge().apply { background = circleDrawable(color); text = letter }, LinearLayout.LayoutParams(dp(36), dp(36)))
+            row.addView(TextView(this).apply {
+                text = engine.label
+                textSize = 16f
+                setTextColor(palette.textPrimary)
+                setPadding(dp(16), 0, 0, 0)
+            })
+            container.addView(row)
+        }
+        dialog.setContentView(container)
+        dialog.show()
     }
 
-    private fun cycleEngine() {
+    /** Bottom-sheet picker for the AI assistant (Gemini / ChatGPT.com / Claude.ai). */
+    private fun showAiPicker() {
         val tab = currentTab() ?: return
-        tab.searchEngine = SearchEngine.next(tab.searchEngine)
-        if (tab.currentSubTab != SubTab.ANSWER && tab.lastQuery.isNotBlank()) {
-            tab.runSearch(tab.lastQuery)
+        val dialog = BottomSheetDialog(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            setBackgroundColor(palette.surface)
         }
-        renderSubTabsAndContent()
+        container.addView(TextView(this).apply {
+            text = "ИИ-ассистент"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(palette.textPrimary)
+            setPadding(0, 0, 0, dp(12))
+        })
+        AiService.values().forEach { ai ->
+            val (color, symbol) = aiServiceAccent(ai)
+            val selected = ai == tab.aiService
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = if (selected) pillDrawable(palette.chipSelectedBg, palette.chipSelectedBg) else null
+                setOnClickListener {
+                    tab.aiService = ai
+                    tab.currentSubTab = SubTab.ANSWER
+                    tab.answerWebView.loadUrl(if (tab.lastQuery.isNotBlank()) ai.queryUrl(tab.lastQuery) else ai.homeUrl())
+                    renderSubTabsAndContent()
+                    dialog.dismiss()
+                }
+            }
+            row.addView(circleBadge().apply { background = circleDrawable(color); text = symbol }, LinearLayout.LayoutParams(dp(36), dp(36)))
+            row.addView(TextView(this).apply {
+                text = ai.label
+                textSize = 16f
+                setTextColor(palette.textPrimary)
+                setPadding(dp(16), 0, 0, 0)
+            })
+            container.addView(row)
+        }
+        dialog.setContentView(container)
+        dialog.show()
+    }
+
+    /** Simple Light / Dark / System theme picker. Rebuilds the toolbar chrome in place, keeping all open tabs and webviews alive. */
+    private fun showSettingsDialog() {
+        val modes = ThemeMode.values()
+        val current = ThemePrefs.getMode(this)
+        val labels = modes.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Тема оформления")
+            .setSingleChoiceItems(labels, modes.indexOf(current)) { dialog, which ->
+                ThemePrefs.setMode(this, modes[which])
+                palette = ThemePrefs.resolvePalette(this)
+                buildUi()
+                renderTabStrip()
+                renderSubTabsAndContent()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     private fun performSearch() {
