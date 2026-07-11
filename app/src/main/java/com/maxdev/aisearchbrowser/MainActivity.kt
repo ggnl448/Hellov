@@ -24,6 +24,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -64,9 +65,92 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        palette = ThemePrefs.resolvePalette(this)
-        buildUi()
-        addNewTab(switchToIt = true)
+
+        // Safety net: if anything crashes anywhere in the app after this point,
+        // show the actual error on screen instead of a silent blank/broken UI or
+        // a system "app has stopped" dialog. Screenshot this text and send it over.
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                runOnUiThread { showCrashScreen(throwable) }
+            } catch (ignored: Throwable) {
+                previousHandler?.uncaughtException(thread, throwable)
+            }
+        }
+
+        try {
+            palette = ThemePrefs.resolvePalette(this)
+            buildUi()
+            if (!restoreTabsState()) {
+                addNewTab(switchToIt = true)
+            }
+        } catch (t: Throwable) {
+            showCrashScreen(t)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        saveTabsState()
+    }
+
+    // region ---------- Persisting open tabs across app restarts ----------
+
+    private fun tabsPrefs() = getSharedPreferences("tabs_state", MODE_PRIVATE)
+
+    private fun saveTabsState() {
+        try {
+            val array = org.json.JSONArray()
+            tabs.forEach { array.put(it.toJson()) }
+            tabsPrefs().edit()
+                .putString("tabs", array.toString())
+                .putInt("current_index", currentTabIndex)
+                .putInt("next_id", nextTabId)
+                .apply()
+        } catch (t: Throwable) {
+            // Saving is best-effort; never crash the app over it.
+        }
+    }
+
+    /** Returns true if at least one tab was restored. */
+    private fun restoreTabsState(): Boolean {
+        return try {
+            val prefs = tabsPrefs()
+            val raw = prefs.getString("tabs", null) ?: return false
+            val array = org.json.JSONArray(raw)
+            if (array.length() == 0) return false
+            for (i in 0 until array.length()) {
+                val json = array.getJSONObject(i)
+                val tab = BrowserTab.fromJson(json, createWebView(), createWebView(), createWebView())
+                tabs.add(tab)
+            }
+            nextTabId = prefs.getInt("next_id", tabs.size + 1)
+            currentTabIndex = prefs.getInt("current_index", 0).coerceIn(0, tabs.size - 1)
+            renderTabStrip()
+            renderSubTabsAndContent()
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    // endregion
+
+    /** Shows the full stack trace as plain, selectable text so it can be read/screenshotted without logcat. */
+    private fun showCrashScreen(t: Throwable) {
+        val text = TextView(this).apply {
+            text = "Произошла ошибка. Скриншот этого текста пришли для диагностики:\n\n" + android.util.Log.getStackTraceString(t)
+            setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            textSize = 11f
+            setTextIsSelectable(true)
+            setPadding(dp(16))
+        }
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#B00020"))
+            addView(text, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        setContentView(scroll)
     }
 
     // region ---------- UI construction ----------
@@ -106,48 +190,22 @@ class MainActivity : AppCompatActivity() {
 
         addDivider()
 
-        // ---- Search engine + AI row ----
-        val controlsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        val engineCaption = TextView(this).apply {
-            text = "Поисковая система:"
-            setTextColor(palette.textSecondary)
-        }
-        engineBadge = circleBadge()
-        engineBadge.setOnClickListener { showEnginePicker() }
-
-        val spacer = View(this)
-
-        val aiCaption = TextView(this).apply {
-            text = "ИИ:"
-            setTextColor(palette.textSecondary)
-            setPadding(dp(4), 0, 0, 0)
-        }
-        aiBadge = circleBadge()
-        aiBadge.setOnClickListener { showAiPicker() }
-
-        controlsRow.addView(engineCaption)
-        controlsRow.addView(engineBadge, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(8) })
-        controlsRow.addView(spacer, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        controlsRow.addView(aiCaption)
-        controlsRow.addView(aiBadge, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(8) })
-        root.addView(controlsRow)
-
-        // ---- Search box row ----
+        // ---- Search box row: engine icon (leading) + input + search button ----
         val searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(12), dp(8))
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            minimumHeight = dp(48)
+            setBackgroundColor(palette.background)
         }
+        engineBadge = circleBadge()
+        engineBadge.setOnClickListener { showEnginePicker() }
         searchInput = EditText(this).apply {
             hint = "Задайте вопрос или введите запрос"
             setHintTextColor(palette.textSecondary)
             setTextColor(palette.textPrimary)
             background = pillDrawable(palette.surface, palette.chipBorder)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setPadding(dp(16), dp(10), dp(16), dp(10))
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setOnEditorActionListener { _, actionId, _ ->
@@ -162,16 +220,22 @@ class MainActivity : AppCompatActivity() {
             setColorFilter(Color.WHITE)
             setOnClickListener { performSearch() }
         }
+        searchRow.addView(engineBadge, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(8) })
         searchRow.addView(searchInput, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(8) })
-        root.addView(searchRow)
+        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(8) })
+        root.addView(searchRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // ---- Sub-tabs row: Ответ / Ссылки / Изображения ----
+        // ---- Sub-tabs row: Ответ / Ссылки / Изображения + AI icon (trailing) ----
         subTabRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), 0, dp(12), 0)
+            minimumHeight = dp(40)
+            setBackgroundColor(palette.background)
         }
-        root.addView(subTabRow)
+        aiBadge = circleBadge()
+        aiBadge.setOnClickListener { showAiPicker() }
+        root.addView(subTabRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         addDivider()
 
         // ---- Progress bar ----
@@ -411,6 +475,8 @@ class MainActivity : AppCompatActivity() {
             }
             subTabRow.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
+        (aiBadge.parent as? ViewGroup)?.removeView(aiBadge)
+        subTabRow.addView(aiBadge, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(8) })
 
         // content: show the correct webview, detaching it from any previous parent first
         val wv = tab.webViewFor(tab.currentSubTab)
