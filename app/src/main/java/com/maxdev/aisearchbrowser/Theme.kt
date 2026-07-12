@@ -90,4 +90,6 @@ fun aiServiceAccent(ai: AiService): Pair<Int, String> = when (ai) {
     AiService.GEMINI -> Color.parseColor("#4285F4") to "✦"
     AiService.CHATGPT -> Color.parseColor("#10A37F") to "✦"
     AiService.CLAUDE -> Color.parseColor("#DA7756") to "✦"
+    AiService.GROK -> Color.parseColor("#1A1A1A") to "✦"
+    AiService.COPILOT -> Color.parseColor("#0078D4") to "✦"
 }

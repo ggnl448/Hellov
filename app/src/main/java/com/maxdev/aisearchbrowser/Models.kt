@@ -45,16 +45,20 @@ enum class SearchEngine(val label: String) {
     }
 }
 
-/** The three switchable AI assistants used by the "Ответ" tab. */
+/** The switchable AI assistants used by the "Ответ" tab. */
 enum class AiService(val label: String) {
     GEMINI("Gemini"),
     CHATGPT("ChatGPT.com"),
-    CLAUDE("Claude.ai");
+    CLAUDE("Claude.ai"),
+    GROK("Grok"),
+    COPILOT("Copilot");
 
     fun homeUrl(): String = when (this) {
         GEMINI -> "https://gemini.google.com/app"
         CHATGPT -> "https://chatgpt.com/"
         CLAUDE -> "https://claude.ai/new"
+        GROK -> "https://grok.com/"
+        COPILOT -> "https://copilot.microsoft.com/"
     }
 
     /**
@@ -67,6 +71,8 @@ enum class AiService(val label: String) {
         CHATGPT -> "https://chatgpt.com/?q=${encode(query)}"
         GEMINI -> homeUrl()
         CLAUDE -> homeUrl()
+        GROK -> homeUrl()
+        COPILOT -> homeUrl()
     }
 
     companion object {

@@ -26,6 +26,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -55,11 +56,15 @@ class MainActivity : AppCompatActivity() {
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = pendingFileCallback
         pendingFileCallback = null
-        if (callback == null) return@registerForActivityResult
+        if (callback == null) {
+            Toast.makeText(this, "Файл получен, но страница уже не ждёт его (возможно, приложение было выгружено из памяти)", Toast.LENGTH_LONG).show()
+            return@registerForActivityResult
+        }
         val data = result.data
         val uris: Array<Uri>? = if (result.resultCode == Activity.RESULT_OK && data != null) {
             WebChromeClient.FileChooserParams.parseResult(result.resultCode, data)
         } else null
+        Toast.makeText(this, "Файлов получено: ${uris?.size ?: 0}", Toast.LENGTH_SHORT).show()
         callback.onReceiveValue(uris)
     }
 
@@ -327,9 +332,11 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
-            // Fixes "file picker doesn't open" for <input type=file> on pages like
-            // ChatGPT/Claude/Gemini (attaching files/images) by launching the real
-            // Android file picker and returning the chosen file(s) to the webview.
+            // Fixes "file picker doesn't open / picked file never reaches the page" for
+            // <input type=file> on pages like ChatGPT/Claude/Gemini/Grok/Copilot
+            // (attaching files/images). Builds our own intent explicitly (more
+            // reliable across devices than always trusting FileChooserParams.createIntent())
+            // and shows small Toasts at each step so a failure is visible without logcat.
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -337,14 +344,29 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 pendingFileCallback?.onReceiveValue(null)
                 pendingFileCallback = filePathCallback
-                val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = "*/*"
+
+                val acceptTypes = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() && it != "*/*" } ?: emptyList()
+                val allowMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
+                    when {
+                        acceptTypes.isEmpty() -> type = "*/*"
+                        acceptTypes.size == 1 -> type = acceptTypes[0]
+                        else -> {
+                            type = "*/*"
+                            putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
+                        }
+                    }
+                    if (allowMultiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 }
+                val chooser = Intent.createChooser(getContentIntent, "Выбрать файл")
+
                 return try {
-                    fileChooserLauncher.launch(intent)
+                    Toast.makeText(this@MainActivity, "Открываю выбор файла…", Toast.LENGTH_SHORT).show()
+                    fileChooserLauncher.launch(chooser)
                     true
                 } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Не удалось открыть выбор файла: ${e.message}", Toast.LENGTH_LONG).show()
                     pendingFileCallback = null
                     false
                 }
