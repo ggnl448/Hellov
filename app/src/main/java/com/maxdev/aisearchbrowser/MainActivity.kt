@@ -44,8 +44,8 @@ class MainActivity : AppCompatActivity() {
     // Views that get rebuilt/updated as state changes
     private lateinit var root: LinearLayout
     private lateinit var tabStrip: LinearLayout
-    private lateinit var engineBadge: TextView
-    private lateinit var aiBadge: TextView
+    private lateinit var engineBadge: FrameLayout
+    private lateinit var aiBadge: FrameLayout
     private lateinit var subTabRow: LinearLayout
     private lateinit var searchInput: EditText
     private lateinit var contentContainer: FrameLayout
@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity() {
             minimumHeight = dp(48)
             setBackgroundColor(palette.background)
         }
-        engineBadge = circleBadge()
+        engineBadge = FrameLayout(this)
         engineBadge.setOnClickListener { showEnginePicker() }
         searchInput = EditText(this).apply {
             hint = "Задайте вопрос или введите запрос"
@@ -238,7 +238,7 @@ class MainActivity : AppCompatActivity() {
             minimumHeight = dp(40)
             setBackgroundColor(palette.background)
         }
-        aiBadge = circleBadge()
+        aiBadge = FrameLayout(this)
         aiBadge.setOnClickListener { showAiPicker() }
         root.addView(subTabRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         addDivider()
@@ -253,6 +253,28 @@ class MainActivity : AppCompatActivity() {
         // ---- Content container that holds the currently visible WebView ----
         contentContainer = FrameLayout(this)
         root.addView(contentContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // ---- Bottom nav placeholders: these features are previews of what's coming
+        // in v2.00 and aren't wired up to anything yet — tapping just says so. ----
+        val bottomBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(palette.surface)
+        }
+        addDivider()
+        listOf("Изображения", "Поиск", "Ответ", "ИИ-вкладки", "Вкладки изображений").forEach { label ->
+            val item = TextView(this).apply {
+                text = label
+                textSize = 11f
+                gravity = Gravity.CENTER
+                setTextColor(palette.textSecondary)
+                setPadding(dp(4), dp(10), dp(4), dp(10))
+                setOnClickListener {
+                    Toast.makeText(this@MainActivity, "«$label» будет доступно в версии 2.00", Toast.LENGTH_SHORT).show()
+                }
+            }
+            bottomBar.addView(item, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        root.addView(bottomBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
     private fun addDivider() {
@@ -277,6 +299,41 @@ class MainActivity : AppCompatActivity() {
         gravity = Gravity.CENTER
         setTextColor(Color.WHITE)
         textSize = 14f
+    }
+
+    /**
+     * If the user has dropped a real logo file into res/drawable (e.g. ic_google.png,
+     * see README), show that. Otherwise fall back to the colored letter badge so the
+     * app never breaks just because an icon file is missing.
+     */
+    private fun realIconResId(drawableName: String): Int {
+        val id = resources.getIdentifier(drawableName, "drawable", packageName)
+        return id
+    }
+
+    private fun iconView(sizeDp: Int, drawableName: String, fallbackColor: Int, fallbackLetter: String): View {
+        val resId = realIconResId(drawableName)
+        return if (resId != 0) {
+            android.widget.ImageView(this).apply {
+                setImageResource(resId)
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                clipToOutline = true
+            }
+        } else {
+            circleBadge().apply {
+                background = circleDrawable(fallbackColor)
+                text = fallbackLetter
+            }
+        }
+    }
+
+    /** Clears a badge container and fills it with the right icon (real logo or fallback letter). */
+    private fun fillBadge(container: FrameLayout, sizeDp: Int, drawableName: String, fallbackColor: Int, fallbackLetter: String) {
+        container.removeAllViews()
+        container.addView(
+            iconView(sizeDp, drawableName, fallbackColor, fallbackLetter),
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
     }
 
     // endregion
@@ -470,12 +527,10 @@ class MainActivity : AppCompatActivity() {
 
         // engine / AI badges
         val (engineColor, engineLetter) = searchEngineAccent(tab.searchEngine)
-        engineBadge.background = circleDrawable(engineColor)
-        engineBadge.text = engineLetter
+        fillBadge(engineBadge, 32, searchEngineDrawableName(tab.searchEngine), engineColor, engineLetter)
 
         val (aiColor, aiSymbol) = aiServiceAccent(tab.aiService)
-        aiBadge.background = circleDrawable(aiColor)
-        aiBadge.text = aiSymbol
+        fillBadge(aiBadge, 30, aiServiceDrawableName(tab.aiService), aiColor, aiSymbol)
 
         searchInput.setText(tab.lastQuery)
 
@@ -544,7 +599,7 @@ class MainActivity : AppCompatActivity() {
                     dialog.dismiss()
                 }
             }
-            row.addView(circleBadge().apply { background = circleDrawable(color); text = letter }, LinearLayout.LayoutParams(dp(36), dp(36)))
+            row.addView(iconView(36, searchEngineDrawableName(engine), color, letter), LinearLayout.LayoutParams(dp(36), dp(36)))
             row.addView(TextView(this).apply {
                 text = engine.label
                 textSize = 16f
@@ -589,7 +644,7 @@ class MainActivity : AppCompatActivity() {
                     dialog.dismiss()
                 }
             }
-            row.addView(circleBadge().apply { background = circleDrawable(color); text = symbol }, LinearLayout.LayoutParams(dp(36), dp(36)))
+            row.addView(iconView(36, aiServiceDrawableName(ai), color, symbol), LinearLayout.LayoutParams(dp(36), dp(36)))
             row.addView(TextView(this).apply {
                 text = ai.label
                 textSize = 16f

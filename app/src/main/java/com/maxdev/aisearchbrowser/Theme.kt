@@ -86,10 +86,26 @@ fun searchEngineAccent(engine: SearchEngine): Pair<Int, String> = when (engine) 
     SearchEngine.YANDEX -> Color.parseColor("#FC3F1D") to "Y"
 }
 
+/** Expected drawable filename (without extension) if the user drops in a real logo — see README. */
+fun searchEngineDrawableName(engine: SearchEngine): String = when (engine) {
+    SearchEngine.GOOGLE -> "ic_google"
+    SearchEngine.BING -> "ic_bing"
+    SearchEngine.DUCKDUCKGO -> "ic_duckduckgo"
+    SearchEngine.YANDEX -> "ic_yandex"
+}
+
+fun aiServiceDrawableName(ai: AiService): String = when (ai) {
+    AiService.GEMINI -> "ic_gemini"
+    AiService.CHATGPT -> "ic_chatgpt"
+    AiService.CLAUDE -> "ic_claude"
+    AiService.GROK -> "ic_grok"
+    AiService.COPILOT -> "ic_copilot"
+}
+
 fun aiServiceAccent(ai: AiService): Pair<Int, String> = when (ai) {
-    AiService.GEMINI -> Color.parseColor("#4285F4") to "✦"
-    AiService.CHATGPT -> Color.parseColor("#10A37F") to "✦"
-    AiService.CLAUDE -> Color.parseColor("#DA7756") to "✦"
-    AiService.GROK -> Color.parseColor("#1A1A1A") to "✦"
-    AiService.COPILOT -> Color.parseColor("#0078D4") to "✦"
+    AiService.GEMINI -> Color.parseColor("#4285F4") to "Ge"
+    AiService.CHATGPT -> Color.parseColor("#10A37F") to "Ch"
+    AiService.CLAUDE -> Color.parseColor("#DA7756") to "Cl"
+    AiService.GROK -> Color.parseColor("#1A1A1A") to "Gr"
+    AiService.COPILOT -> Color.parseColor("#0078D4") to "Co"
 }
