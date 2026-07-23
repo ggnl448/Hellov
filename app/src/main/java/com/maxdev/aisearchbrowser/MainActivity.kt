@@ -171,37 +171,30 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(root)
 
-        // ---- Tab strip (browser tabs, Chrome-style) + settings gear ----
-        val tabStripRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
+        // ---- Tab strip (browser tabs, Chrome-style) ----
         val tabStripScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         tabStrip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(8))
         }
         tabStripScroll.addView(tabStrip)
-        val settingsButton = TextView(this).apply {
-            text = "⚙"
-            textSize = 18f
-            setTextColor(palette.textSecondary)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setOnClickListener { showSettingsDialog() }
-        }
-        tabStripRow.addView(tabStripScroll, LinearLayout.LayoutParams(0, dp(48), 1f))
-        tabStripRow.addView(settingsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)))
-        root.addView(tabStripRow)
+        root.addView(tabStripScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
 
         addDivider()
 
-        // ---- Search box row: engine icon (leading) + input + search button ----
-        val searchRow = LinearLayout(this).apply {
+        // ---- Search pill: engine icon + input + search button, all merged into one
+        // rounded bar, with the settings gear sitting just outside it to the right ----
+        val searchOuterRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            minimumHeight = dp(48)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             setBackgroundColor(palette.background)
+        }
+        val searchPill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = pillDrawable(palette.chipBg, palette.chipBorder)
+            setPadding(dp(6), dp(6), dp(6), dp(6))
         }
         engineBadge = FrameLayout(this)
         engineBadge.setOnClickListener { showEnginePicker() }
@@ -209,8 +202,8 @@ class MainActivity : AppCompatActivity() {
             hint = "Задайте вопрос или введите запрос"
             setHintTextColor(palette.textSecondary)
             setTextColor(palette.textPrimary)
-            background = pillDrawable(palette.surface, palette.chipBorder)
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = null
+            setPadding(dp(10), dp(8), dp(8), dp(8))
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setOnEditorActionListener { _, actionId, _ ->
@@ -221,20 +214,30 @@ class MainActivity : AppCompatActivity() {
         }
         val searchButton = ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_menu_search)
-            background = pillDrawable(palette.accent, palette.accent)
+            background = circleDrawable(palette.accent)
             setColorFilter(Color.WHITE)
             setOnClickListener { performSearch() }
         }
-        searchRow.addView(engineBadge, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(8) })
-        searchRow.addView(searchInput, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(8) })
-        root.addView(searchRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val settingsButton = TextView(this).apply {
+            text = "⚙"
+            textSize = 20f
+            setTextColor(palette.textSecondary)
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(4), dp(8))
+            setOnClickListener { showSettingsDialog() }
+        }
+        searchPill.addView(engineBadge, LinearLayout.LayoutParams(dp(32), dp(32)))
+        searchPill.addView(searchInput, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        searchPill.addView(searchButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        searchOuterRow.addView(searchPill, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        searchOuterRow.addView(settingsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(searchOuterRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // ---- Sub-tabs row: Ответ / Ссылки / Изображения + AI icon (trailing) ----
         subTabRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(12), 0)
+            setPadding(dp(12), 0, dp(12), dp(4))
             minimumHeight = dp(40)
             setBackgroundColor(palette.background)
         }
@@ -334,6 +337,32 @@ class MainActivity : AppCompatActivity() {
             iconView(sizeDp, drawableName, fallbackColor, fallbackLetter),
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
+    }
+
+    /** Small placeholder icon shown next to each sub-tab label ("?" / link / picture). Simple text glyphs — no real icon assets needed. */
+    private fun subTabIcon(subTab: SubTab, color: Int): View = when (subTab) {
+        SubTab.ANSWER -> TextView(this).apply {
+            text = "?"
+            gravity = Gravity.CENTER
+            textSize = 11f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(color)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), color)
+            }
+        }
+        SubTab.LINKS -> TextView(this).apply {
+            text = "🔗"
+            gravity = Gravity.CENTER
+            textSize = 12f
+        }
+        SubTab.IMAGES -> TextView(this).apply {
+            text = "🖼"
+            gravity = Gravity.CENTER
+            textSize = 12f
+        }
     }
 
     // endregion
@@ -538,19 +567,31 @@ class MainActivity : AppCompatActivity() {
         subTabRow.removeAllViews()
         SubTab.values().forEach { st ->
             val selected = st == tab.currentSubTab
-            val tv = TextView(this).apply {
-                text = st.label
-                setTextColor(if (selected) palette.accent else palette.textSecondary)
-                setTypeface(typeface, if (selected) Typeface.BOLD else Typeface.NORMAL)
-                gravity = Gravity.CENTER
-                setPadding(dp(4), dp(10), dp(4), dp(10))
-                setOnClickListener {
-                    tab.currentSubTab = st
-                    tab.refreshCurrentSubTab()
-                    renderSubTabsAndContent()
-                }
+            val color = if (selected) palette.accent else palette.textSecondary
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            val labelRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(4), dp(10), dp(4), dp(6))
             }
-            subTabRow.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            labelRow.addView(subTabIcon(st, color), LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(6) })
+            labelRow.addView(TextView(this).apply {
+                text = st.label
+                setTextColor(color)
+                setTypeface(typeface, if (selected) Typeface.BOLD else Typeface.NORMAL)
+                textSize = 13f
+            })
+            val underline = View(this).apply {
+                setBackgroundColor(if (selected) palette.accent else Color.TRANSPARENT)
+            }
+            column.addView(labelRow)
+            column.addView(underline, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
+            column.setOnClickListener {
+                tab.currentSubTab = st
+                tab.refreshCurrentSubTab()
+                renderSubTabsAndContent()
+            }
+            subTabRow.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         (aiBadge.parent as? ViewGroup)?.removeView(aiBadge)
         subTabRow.addView(aiBadge, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(8) })
